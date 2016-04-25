@@ -6,6 +6,7 @@
 #include <colours>
 
 #define CHECK_PERIOD 60
+#define INITIAL_PERIOD 10.0
 #define ITEM_PERIOD 7.5
 #define MAX_DISTANCE 1000.0
 
@@ -29,7 +30,6 @@ ConVar g_vRealBhop;
 Handle g_hCheckTeleport;
 Handle g_hCheckWeapon;
 
-bool g_bAllTeleported;
 bool g_bCheckWeapon;
 bool g_bWarmup;
 bool g_bWeaponsCT;
@@ -57,7 +57,6 @@ public void OnPluginStart()
 {
 	CreateWeaponsArray();
 	
-	HookEvent("item_pickup", Event_ItemPickup);
 	HookEvent("player_death", Event_PlayerDeath);
 	HookEvent("player_spawn", Event_PlayerSpawn);
 	HookEvent("round_start", Event_RoundStart);
@@ -99,22 +98,6 @@ public void OnClientDisconnect_Post(int client)
 /** EVENTS **/
 /************/
 
-public Action Event_ItemPickup(Event event, const char[] name, bool dontBroadcast)
-{
-	// If everyone has teleported
-	if (g_bAllTeleported && g_bCheckWeapon)
-	{
-		if (g_vAutoBhop.IntValue == 1)
-		{
-			char Weapon[64];
-			event.GetString("item", Weapon, sizeof(Weapon));
-			
-			if (g_aWeapons.FindString(Weapon) != -1)
-				DisableAutoBhop();
-		}
-	}
-}
-
 public Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast)
 {
 	int UserId = event.GetInt("userid");
@@ -138,8 +121,7 @@ public Action Event_RoundStart(Event event, const char[] name, bool dontBroadcas
 		g_hCheckWeapon = null;
 		
 	// Reset all variables
-	g_bAllTeleported = false;
-	g_bCheckWeapon = false;
+	g_bCheckWeapon = true;
 	g_iCheckCount = 0;
 	g_iRoundCounter++;
 	
@@ -155,13 +137,56 @@ public Action Event_RoundStart(Event event, const char[] name, bool dontBroadcas
 		g_bWarmup = false;
 		
 	if ( !g_bWarmup)
+	{
 		g_hCheckTeleport = CreateTimer(1.0, Timer_CheckTeleport, _, TIMER_FLAG_NO_MAPCHANGE|TIMER_REPEAT);
+		g_hCheckWeapon = CreateTimer(INITIAL_PERIOD, Timer_CheckWeapon, _, TIMER_FLAG_NO_MAPCHANGE);
+	}
 		
 	if (g_vAutoBhop.IntValue == 0)
 		CPrintToChatAll("{pink}[Multiplay]{default} Auto bhop has been {green}enabled.");
 		
 	g_vAutoBhop.IntValue = 1;
 	g_vRealBhop.IntValue = 0;
+}
+
+public int OnEntityCreated(int entity, const char[] classname)
+{
+	if ( !g_bWarmup)
+	{
+		if (g_aWeapons.FindString(classname) != -1)
+		{
+			SDKHook(entity, SDKHook_Touch, Hook_WeaponTouch);
+		}
+	}
+}
+
+public int OnEntityDestroyed(int entity)
+{
+	if ( !g_bWarmup)
+	{
+		char Classname[32];
+		GetEntityClassname(entity, Classname, sizeof(Classname));
+		if (g_aWeapons.FindString(Classname) != -1)
+		{
+			SDKUnhook(entity, SDKHook_Touch, Hook_WeaponTouch);
+		}
+	}
+}
+
+/***********/
+/** HOOKS **/
+/***********/
+
+public Action Hook_WeaponTouch(int entity, int other)
+{
+	if ((0 < other) && (other <= MaxClients))
+	{
+		// Do we possibly disable auto bhop
+		if (g_vAutoBhop.IntValue == 1)
+		{
+			CreateTimer(1.0, Timer_WeaponTouch, _, TIMER_FLAG_NO_MAPCHANGE);
+		}
+	}
 }
 
 /************/
@@ -215,9 +240,8 @@ public Action Timer_CheckTeleport(Handle timer)
 	
 	if (g_iPlayersAlive == g_iTeleportedCount)
 	{
-		g_bAllTeleported = true;
 		g_bCheckWeapon = true;
-		g_hCheckTeleport = CreateTimer(ITEM_PERIOD, Timer_CheckWeapon, _, TIMER_FLAG_NO_MAPCHANGE);
+		g_hCheckWeapon = CreateTimer(ITEM_PERIOD, Timer_CheckWeapon, _, TIMER_FLAG_NO_MAPCHANGE);
 		return Plugin_Stop;
 	}
 	
@@ -234,6 +258,13 @@ public Action Timer_GiveWeapons(Handle timer, any data)
 {
 	int Client = GetClientOfUserId(data);
 	GiveWeapons(Client);
+}
+
+public Action Timer_WeaponTouch(Handle timer, any data)
+{
+	// If we are checking weapons still
+	if (g_bCheckWeapon && (g_vAutoBhop.IntValue == 1))
+		DisableAutoBhop();
 }
 
 public Action Timer_PlayerSpawn(Handle timer, any data)
@@ -259,7 +290,7 @@ void CreateWeaponsArray()
 {
 	g_aWeapons = new ArrayList(64, 0);
 	
-	char Weapons[][64] = { "deagle", "ak47", "m4a1", "m4a1_silencer", "galilar", "famas", "sg556", "aug", "awp" };
+	char Weapons[][64] = { "weapon_deagle", "weapon_ak47", "weapon_m4a1", "weapon_m4a1_silencer", "weapon_galilar", "weapon_famas", "weapon_sg556", "weapon_aug", "weapon_awp" };
 	
 	for (int i; i < sizeof(Weapons); i++)
 	{
